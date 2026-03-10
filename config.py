@@ -1,6 +1,9 @@
 from dataclasses import dataclass
 from decouple import config
+from pathlib import Path
 from typing import Final
+
+_BASE_DIR = Path(__file__).parent
 
 
 @dataclass
@@ -12,8 +15,8 @@ class Settings:
     SCALEKIT_RESOURCE_METADATA_URL: Final[str] = config("SCALEKIT_RESOURCE_METADATA_URL")
     SCALEKIT_AUDIENCE_NAME: Final[str] = config("SCALEKIT_AUDIENCE_NAME")
     METADATA_JSON_RESPONSE: Final[str] = config("METADATA_JSON_RESPONSE")
-    PERSISTENT_DIR: Final[str] = "./chromadb"
-    DATA_DIR: Final[str] = "./data"
+    PERSISTENT_DIR: Final[str] = str(_BASE_DIR / "chromadb")
+    DATA_DIR: Final[str] = str(_BASE_DIR / "data")
     COLLECTION_NAME: Final[str] = "rag_mcp"
 
     # Llama API Key

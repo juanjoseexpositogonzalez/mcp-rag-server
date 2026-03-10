@@ -69,7 +69,7 @@ def ingest_data_dir():
         )
         new_count += 1
 
-    return "Ingested {new_count} new documents (total: {collection.count()})"
+    return f"Ingested {new_count} new documents (total: {collection.count()})"
 
 
 @mcp.tool
