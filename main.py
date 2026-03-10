@@ -1,125 +1,45 @@
-from typing import Final
+import json
+import uvicorn
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
-import chromadb
-from fastmcp import FastMCP
-from decouple import config
-from llama_index.core import SimpleDirectoryReader
-from llama_cloud_services import LlamaParse
+from auth import AuthMiddleware
+from config import settings
+from rag_mcp_server import mcp as rag_mcp_server
 
-LLAMA_CLOUD_API_KEY: Final[str] = config("LLAMA_CLOUD_API_KEY")
-PERSISTENT_DIR: Final[str] = "./chromadb"
-DATA_DIR: Final[str] = "./data"
-COLLECTION_NAME: Final[str] = "rag_mcp"
+app = FastAPI()
 
-mcp = FastMCP("RAG Server")
+# Add CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"], # In production, specify your actual origins
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["*"],
+)
 
-def init_chroma():
+# MCP well-known endpoints (RFC 9728)
+# VS Code tries both path variants depending on the MCP endpoint URL
+@app.get("/.well-known/oauth-protected-resource/mcp")
+@app.get("/.well-known/oauth-protected-resource/mcp/")
+@app.get("/.well-known/oauth-protected-resource")
+async def oauth_protected_resource_metadata():
     """
-    Initialize chroma client
+    OAuth 2.1 Protected Resource Metadata endpoint for MCP client discovery.
+    Required by the MCP specification for authorization server discovery.
     """
-    client = get_chroma_client()
-    
-    collection = client.get_or_create_collection(name=COLLECTION_NAME)
-    return collection
-
-def get_chroma_client():
-    """
-    Get the chroma client
-    """
-    return chromadb.PersistentClient(path=PERSISTENT_DIR)
-
-def get_ingested_files(collection) -> set[str]:
-    """Get the set of file names already stored in the collection."""
-    if collection.count() == 0:
-        return set()
-    results = collection.get(include=["metadatas"])
-    return {m.get("file_name") for m in results["metadatas"] if m.get("file_name")}
-
-
-@mcp.tool
-def ingest_data_dir():
-    """Ingest and vectorize PDF files from the data directory into ChromaDB.
-
-    Parses PDFs using LlamaParse, extracts text content, and stores document
-    chunks in the vector database. Files already present in the collection
-    are automatically skipped to avoid duplicates.
-
-    Returns:
-        str: Summary message with the number of new and total documents ingested.
-    """
-    collection = init_chroma()
-    ingested_files = get_ingested_files(collection)
-
-    parser = LlamaParse(api_key=LLAMA_CLOUD_API_KEY, result_type="text")
-    file_extractor = {".pdf": parser}
-
-    documents = SimpleDirectoryReader(DATA_DIR, file_extractor=file_extractor).load_data()
-
-    new_count = 0
-    for doc in documents:
-        file_name = doc.metadata.get("file_name")
-        if file_name in ingested_files:
-            continue
-        collection.add(
-            documents=[doc.text],
-            metadatas=[doc.metadata],
-            ids=[doc.doc_id],
-        )
-        new_count += 1
-
-    return "Ingested {new_count} new documents (total: {collection.count()})"
-
-
-@mcp.tool
-def query_documents(query: str, n_results: int = 2) -> str:
-    """Search ingested documents using natural language queries.
-
-    Performs semantic similarity search against the ChromaDB collection
-    and returns the most relevant document chunks with source metadata
-    and similarity scores.
-
-    Args:
-        query: Natural language search query.
-        n_results: Maximum number of results to return (default: 2).
-
-    Returns:
-        str: Formatted search results including content, source file, and similarity score.
-    """
-    chroma_client = get_chroma_client()
-    collection = chroma_client.get_collection(name=COLLECTION_NAME)
-
-    results = collection.query(
-        query_texts=[query],
-        n_results=n_results,
-        include=["metadatas", "documents", "distances"]
-    )
-    if len(results["documents"]) == 0 or not results["documents"][0]:
-        return f"No documents found for query '{query}'"
-    
-    # Format results
-    formatted_results = []
-    documents = results["documents"][0]
-    metadatas = results["metadatas"][0] if results["metadatas"] else [{}] * len(documents)
-    distances = results["distances"][0] if results["distances"] else [{}] * len(documents)
-
-    for i, (doc, metadata, distance) in enumerate(zip(documents, metadatas, distances)):
-        result_text = f"\n--- Result {i+1} ---\n"
-        result_text += f"Content: {doc}\n"
-        result_text += f"Source {metadata.get('file_name', 'Unknown')}\n"
-        result_text += f"Similarity Score: {1 - distance:.3f}\n"
-        formatted_results.append(result_text)
-
-    response = f"Found {len(documents)} relevant documents for query: '{query}'\n"
-    response += "\n".join(formatted_results)
-
+    response = json.loads(settings.METADATA_JSON_RESPONSE)
     return response
 
+# Create and mount the MCP server with authentication
+mcp_app = rag_mcp_server.http_app()
+app.router.lifespan_context = mcp_app.lifespan
+app.add_middleware(AuthMiddleware)
+app.mount("/", mcp_app)
 
 def main():
-    init_chroma()
-    mcp.run(transport="stdio")
-
-
+    """Main entry point for the MCP server"""
+    uvicorn.run(app, host="localhost", port=settings.PORT, log_level="debug")
 
 if __name__ == "__main__":
     main()
