@@ -6,10 +6,12 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "chromadb>=1.5.4",
+    "fastapi>=0.135.1",
     "fastmcp>=3.1.0",
     "llama-cloud-services>=0.6.94",
     "llama-index-core>=0.12.0,<0.13",
     "llama-index-readers-file>=0.4.0,<0.5",
     "mcp>=1.26.0",
     "python-decouple>=3.8",
+    "scalekit-sdk-python>=2.5.0",
 ]
